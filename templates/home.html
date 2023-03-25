@@ -8,20 +8,76 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/wavesurfer.js"></script>
   </head>
-  <body class="h-screen flex flex-col items-center justify-center w-screen min-h-screen bg-gray-100 text-gray-800 p-4">
-    <div class="relative flex flex-col flex-grow w-full h-full max-w-xl bg-white shadow-xl rounded-lg overflow-auto">
-      <div id="chatbox" class="h-full grid grid-cols-1 justify-center justify-items-center content-start gap-4 h-0 p-4 overflow-auto"></div>
-      <button id="recordBtn" data-recording="0" onclick="record()" class="absolute bottom-4 left-0 right-0 m-auto bg-gray-100 w-fit py-4 px-6 rounded-full shadow-md cursor-pointer flex flex-row items-center justify-center gap-4">
-        <span>Record</span>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-        </svg>
-      </button>
+  <body
+    class="h-screen flex flex-col items-center justify-center w-screen min-h-screen bg-gray-100 text-gray-800 p-4"
+  >
+    <div
+      class="relative flex flex-col flex-grow w-full h-full max-w-xl bg-white shadow-xl rounded-lg overflow-auto"
+    >
+      <div
+        id="chatbox"
+        class="h-full grid grid-cols-1 justify-center justify-items-center content-start gap-4 h-0 p-4 overflow-auto"
+      ></div>
+      <div
+        id="BtnArray"
+        class="w-max absolute bottom-4 left-0 right-0 m-auto flex flex-row items-center justify-items-center gap-4"
+      >
+        <button
+          id="recordBtn"
+          data-recording="0"
+          onclick="record()"
+          class="bg-gray-100 w-fit py-4 px-6 rounded-full shadow-md cursor-pointer flex flex-row items-center justify-center gap-4"
+        >
+          <span>Record</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+            />
+          </svg>
+        </button>
+        <button
+          id="newBtn"
+          onclick="(() => location.reload())()"
+          class="bg-gray-100 w-fit py-4 px-6 rounded-full shadow-md cursor-pointer flex flex-row items-center justify-center gap-4"
+        >
+          <span>New Task</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <script>
-      let isRecording = false,
+      let isRecording,
+        taskMessage,
         mediaRecorder,
+        task = {
+          audio: false,
+          transcribe: false,
+          allowed: false,
+          done: false,
+        },
         waveSurfers = [];
 
       const record = () => {
@@ -42,8 +98,15 @@
               });
 
               mediaRecorder.addEventListener("stop", async () => {
+                task.audio = true;
+
                 const messageBox = document.createElement("div");
-                messageBox.classList.add("bg-gray-100", "p-2", "rounded-3xl", "w-full");
+                messageBox.classList.add(
+                  "bg-gray-100",
+                  "p-2",
+                  "rounded-3xl",
+                  "w-full"
+                );
 
                 const blob = new Blob(chunks, { type: "audio/ogg" });
                 const audioUrl = URL.createObjectURL(blob);
@@ -55,24 +118,36 @@
 
                 const { text } = await sendAudioToBackend(blob);
                 const newDiv = document.createElement("div");
-                newDiv.classList.add("py-4", "px-8", "rounded-2xl");
+                newDiv.classList.add(
+                  "py-4",
+                  "px-8",
+                  "rounded-2xl",
+                  "break-all"
+                );
                 newDiv.innerHTML = `${text}`;
+                taskMessage = `${text}`;
+                task.transcribe = true;
 
                 messageBox.appendChild(newDiv);
 
                 document.querySelector("#chatbox").appendChild(messageBox);
 
                 ResetRecordBtn();
+
+                setTimeout(validateTask(`${text}`), 1000);
+
+                audioTask = true;
               });
 
               mediaRecorder.start();
 
               setTimeout(() => {
-                if (document.querySelector("#recordBtn").dataset.recording === "1") {
+                if (
+                  document.querySelector("#recordBtn").dataset.recording === "1"
+                ) {
                   mediaRecorder.stop();
                   document.querySelector("#recordBtn").dataset.recording = "0";
                   console.log("max : 1 minute audio.");
-
                   ResetRecordBtn();
                 }
               }, 5000);
@@ -89,7 +164,9 @@
 
       const ResetRecordBtn = () => {
         document.querySelector("#recordBtn").children[0].innerText = `Record`;
-        document.querySelector("#recordBtn").children[1].classList.toggle("animate-ping", false);
+        document
+          .querySelector("#recordBtn")
+          .children[1].classList.toggle("animate-ping", false);
         document.querySelector(
           "#recordBtn"
         ).children[1].innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />`;
@@ -97,9 +174,15 @@
 
       const SetRecordBtn = () => {
         document.querySelector("#recordBtn").dataset.recording = "1";
-        document.querySelector("#recordBtn").children[0].innerText = `Stop recording.`;
-        document.querySelector("#recordBtn").children[1].innerHTML = `<svg viewBox="0 0 10 10" x="6" width="16" fill="red" stroke="red"> <circle cx="5" cy="5" r="4" /> </svg>`;
-        document.querySelector("#recordBtn").children[1].classList.toggle("animate-ping", true);
+        document.querySelector(
+          "#recordBtn"
+        ).children[0].innerText = `Stop recording.`;
+        document.querySelector(
+          "#recordBtn"
+        ).children[1].innerHTML = `<svg viewBox="0 0 10 10" x="6" width="16" fill="red" stroke="red"> <circle cx="5" cy="5" r="4" /> </svg>`;
+        document
+          .querySelector("#recordBtn")
+          .children[1].classList.toggle("animate-ping", true);
       };
 
       const sendAudioToBackend = (blobData) => {
@@ -107,10 +190,17 @@
         fd.append("audio", blobData);
 
         console.log({ blobData, fd });
-        return fetch(`http://localhost:5000/audio`, { headers: { Accept: "application/json" }, method: "POST", body: fd })
+        return fetch(`http://localhost:5000/audio`, {
+          headers: { Accept: "application/json" },
+          method: "POST",
+          body: fd,
+        })
           .then((response) => {
             if (response.ok) return response;
-            else throw Error(`Server returned ${response.status}: ${response.statusText}`);
+            else
+              throw Error(
+                `Server returned ${response.status}: ${response.statusText}`
+              );
           })
           .then(async (response) => response.json())
           .catch((err) => {
@@ -118,7 +208,35 @@
           });
       };
 
+      const disableActionButtons = () => {
+        document.querySelector("#recordBtn").style.opacity = 0.6;
+        document.querySelector("#recordBtn").disabled = true;
+      };
+
       // Validate if the recorded message is a valid task that can be performed using pyautogui, on local machine.
+      const validateTask = async (task) => {
+        disableActionButtons();
+        console.log({ task });
+        const validationResponse = await fetch(
+          `http://localhost:5000/validate/?task=${task}`
+        )
+          .then((response) => {
+            if (response.ok) return response;
+            else
+              throw Error(
+                `Server returned ${response.status}: ${response.statusText}`
+              );
+          })
+          .then((response) => response.json())
+          .catch((err) => {
+            alert(err);
+          });
+
+        const newDiv = document.createElement("div");
+        newDiv.classList.add("py-4", "px-8", "rounded-2xl");
+        newDiv.innerHTML = `${validationResponse}`;
+      };
+
       // find out the steps involved using openai,
       // print the steps, involved, with opacity of 0.6
       // start doing the steps,
