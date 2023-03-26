@@ -1,4 +1,6 @@
-from flask import Flask, render_template, request, jsonify, json
+from flask import Flask, render_template, request, jsonify, json, send_from_directory
+from flask_socketio import SocketIO, emit
+import eventlet
 import requests
 import os
 import openai
@@ -7,21 +9,17 @@ import uuid
 import re
 import time
 
+eventlet.monkey_patch()
+
+pyautogui.PAUSE=1
+pyautogui.FAILSAFE = False
+
 openai.api_key = os.getenv("OPENAI_API_KEY")
 session_hash = os.getenv("SESSION_HASH")
 
-# taskDetails = {
-#     "id": "0",
-#     "task": "",
-#     "is_finished": "",
-#     "started_at": "",
-#     "steps": [],
-# }
+
 
 def predict(input):
-    # if not (isinstance(input, str)):
-    #     return False
-
     url = "http://127.0.0.1:7868/run/predict/"
 
     payload = json.dumps({
@@ -128,15 +126,20 @@ def register(input):
     else:
         return False
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/assets')
+app.config['SECRET_KEY'] = 'secret!'
+socketio = SocketIO(app)
 
 @app.route('/')
 def home():
     return render_template('home.html')
 
+
 @app.route('/audio', methods=['POST'])
+# @socketio.on("transcribe")
 def audio():
     audio_data = request.files.get('audio').read()
+    # audio_data = file['audio']
     print('Received audio data')
 
     # Create a temporary file to write the audio data to
@@ -150,79 +153,51 @@ def audio():
     # Clean up the temporary file
     os.remove('audio.mp3')
 
+    # emit('transcript_result', f"\"{transcript}\"")
+
     return transcript
 
-@app.route('/validate/')
-def validateTask():
-    task = request.args.get('task')
+# @app.route('/validate/')
+@socketio.on('validate')
+def validateTask(task):
+    # task = request.args.get('task')
     print(task)
-    resp = predict('''Is this task a valid task which can be achieved using pyautogui functions, in a step by step manner?\ntask : {taskMessage}\njust reply with 0 for true or 1 for false'''.format(taskMessage=task))
-    if '0' in resp['data'][0][-1][1]:
-        # doTask(task_finished=False, task=task)
-        print(f"response for {task} is {resp['data'][0][-1][1]}")
-        return jsonify({"result": str(resp['data'][0][-1][1])}), 200
-    else:
-        why = predict(f"state the reason why the task:{task}, can't be done ?")
-        why = why.json()
-        return jsonify({"result": str(resp['data'][0][-1][1]), "why": why['data'][0][-1][1]}), 200
+    resp = predict()
 
-@app.route('/do/')
-def doTask():
-    task=request.args.get('task')
-    task_finished = False
-    step_counter = 0
-    steps_performed = []
-    started_at = time.time()
-    timeout = started_at + 300
-
-    steps_response = predict(f"you are going to play a game I invented,\nIn this game, I don't know how to operate a computer, and you have to generate instructions to complete the task:'{task}',\nremember answer by AI is always an array of strings or else I lose the game,\nHuman:what are the steps involved in doing this task : 'Open chrome and tweet something',\nAI: ['opening chrome', 'opening twitter in a chrometab', 'generate a tweet', 'type in the tweet', 'click the tweet button']\nHuman:what are the steps involved in doing this task : 'Calculate 2+2 in calculator',\nAI: ['opening calculator', 'clicking on number 2', 'clicking on the + button', 'clicking on number 2', 'clicking on the = button', 'reading the result as 4']\nreply with an array of strings, containing the steps to undertake to complete the task.")
-
-    # purify_steps_response = predict(f"remove everything including conjunctions and interjections from '{steps_response['data'][0][-1][1]}' and leaving only steps separated by a comma.")
-    purify_steps_response = openai.Completion.create(
+    resp =  openai.Completion.create(
         model="text-davinci-003",
-        prompt=f"string = \"{steps_response['data'][0][-1][1]}\"\nlist steps as an array",
-        temperature=0.05,
-        max_tokens=256,
-        top_p=1,
-        frequency_penalty=0,
-        presence_penalty=0
+        prompt='''Is this task a valid task which can be automated using pyautogui functions, in a step by step manner?\ntask : {taskMessage}\nreply with 0 for true or 1 for false on the first line and the reason on the second line.'''.format(taskMessage=task),
+        temperature=0.7
     )
 
-    if eval(purify_steps_response['choices'][0]['text']):
-        purify_steps_response = eval(purify_steps_response['choices'][0]['text'])
+    if '0' in resp['data'][0][-1][1]:
+        emit("validation result", {"result": str(resp['data'][0][-1][1]), "response": resp})
+        doTask(task)
+        print(f"response for {task} is {resp['data'][0][-1][1]}")
+        # return jsonify({"result": str(resp['data'][0][-1][1]), "response": resp}), 200
+    else:
+        # why = predict(f"state the reason why the task:{task}, can't be done ?")
+        why = why.json()
+        # return jsonify({"result": str(resp['data'][0][-1][1]), "why": why['data'][0][-1][1]}), 200
+        emit("validation result", {"result": str(resp['data'][0][-1][1]), "why": why['data'][0][-1][1]})
 
-    # steps = purify_steps_response['data'][0][-1][1].split(',')
+def screenshot(step_counter, when, retry):
+    # set name of screenshot.
+    before_screenshot_name = f"step_{step_counter}_{when}_{retry}".replace(' ','_').lower()
 
-    # each_step_response = openai.Completion.create(
-    #     model="text-davinci-003",
-    #     prompt=f"now for each instructional step, generate an array of three strings, \n'task_finished': True if the task: {task} has been completed otherwise False, 'purpose': description of the purpose of the next step, 'eval_func':a string with a valid pyautogui function to perform the next step, reply should start with 'The steps to complete the task: '",
-    #     temperature=0.05,
-    #     max_tokens=256,
-    #     top_p=1,
-    #     frequency_penalty=0,
-    #     presence_penalty=0
-    # )
+    # take screenshot
+    before_screen = pyautogui.screenshot()
 
-    # each_step_response = predict(f"now for each instructional step, generate an array of three strings, \n'task_finished': True if the task: {task} has been completed otherwise False, 'purpose': description of the purpose of the next step, 'eval_func':a string with a valid pyautogui function to perform the next step, reply should start with 'The steps to complete the task: '")
+    # save the screenshot.
+    before_screen.save(f"assets/{before_screenshot_name}.png")
 
-    # purify_each_step_response = predict(f"'{each_step_response['data'][0][-1][1]}'\nconvert this string to array of objects, where each object is an instructional step.")
-    for step in purify_steps_response:
-        # set name of screenshot.
-        before_screenshot_name = f"step_{step_counter}".replace(' ','_').lower()
+    # upload the image to the server
+    location = upload(location=f"assets/{before_screenshot_name}.png", name=f"{before_screenshot_name}", type='image/png')
 
-        # take screenshot
-        before_screen = pyautogui.screenshot()
+    # steps_performed.append(["upload", f"screenshot uploaded, name={before_screenshot_name}.png, location=assets/{before_screenshot_name}.png"])
 
-        # save the screenshot.
-        before_screen.save(f"assets/{before_screenshot_name}.png")
-
-        # upload the image to the server
-        location = upload(location=f"assets/{before_screenshot_name}.png", name=f"{before_screenshot_name}", type='image/png')
-
-        steps_performed.append(["upload", f"screenshot uploaded, name={before_screenshot_name}.png, location=assets/{before_screenshot_name}.png"])
-
-        # image meta data along with location and size, for registering the image.
-        img = {
+    # image meta data along with location and size, for registering the image.
+    img = {
             "name": location[0],
             "size": int(before_screen.size[0]*before_screen.size[1]),
             "data": "",
@@ -230,69 +205,108 @@ def doTask():
             "orig_name": f"{before_screenshot_name}.png",
             "is_file": True
         }
-        resp =  register(img)
+    resp =  register(img)
+
+    # steps_performed.append(["registered with visual_chatgpt", f"{resp}"])
+
+    return resp
+
+# @app.route('/do/')
+def doTask(task):
+    # task=request.args.get('task')
+    task_finished = False
+    step_counter = 0
+    steps_performed = []
+    started_at = time.time()
+    timeout = started_at + 300
+
+    steps_response = predict(f"you are going to play a game I invented,\nIn this game, I don't know how to operate a computer, and you have to generate instructions to complete the task:'{task}',\nremember your reply is always an array of strings or else I lose the game,\nreply with an array of strings, containing the steps to undertake to complete the task:{task}. try to use shortcut key combos.")
+
+    emit("steps", steps_response['data'][0][-1][1])
+
+    purify_steps_response = openai.Completion.create(
+        model="text-davinci-003",
+        prompt=f"string = \"{steps_response['data'][0][-1][1]}\"\nlist steps as an array",
+        temperature=0.05
+    )
+
+    if eval(purify_steps_response['choices'][0]['text']):
+        purify_steps_response = eval(purify_steps_response['choices'][0]['text'])
+
+
+    while not task_finished and timeout > time.time():
+        step = purify_steps_response[step_counter]
+        # image has been uploaded and registered.
+        img_name = screenshot(step_counter, 'before', retry)
+
+        emit("images", img_name)
+
+        resp = predict(f"image/{img_name} screenshot of screen. Is this step necessary ? to achieve game task:{task}. if necessary say 'necessary'")
+        resp = resp['data'][0][-1][1]
+
+        if not ('necessary' in resp):
+            print(resp)
+            emit('steps', f"Skipping this step because {resp}")
+            step_counter += 1
+            time.sleep(1)
+            continue
+
+        resp = ''
+        if retry > 0:
+            # ask for instruction providing image name, and task, step
+            resp = predict(f"Retrying this step for the {retry} time, image/{img_name} screenshot of current screen, now for this instructional step: {step}, generate a valid pyautogui function with inputs (like this but not this \"eval_func: pyautogui.press('enter')\"). your reply will be used executed using an eval() function. your reply should start with 'eval_func: '.")
+        else:
+            resp = predict(f"image/{img_name} screenshot of current screen, now for this instructional step: {step}, generate a valid pyautogui function with inputs (like this but not this \"eval_func: pyautogui.press('enter')\"). your reply will be used executed using an eval() function. your reply should start with 'eval_func: '.")
+
+        resp = resp['data'][0][-1][1]
+
+        emit("steps", resp)
+
+        # regular expression pattern to match pyautogui function calls
+        pattern = r'pyautogui\.\w+\(.*\)'
+
+        # find all matches of the pattern in the string
+        eval_func = re.search(pattern, resp).group()
+
+        # remove unwanted characters.
+        eval_func = eval_func.replace("‘", "\"").replace("’", "\"").replace("\n", "")
+
+        steps_performed.append(["eval_func", f"{resp}"])
+        # evaluate the recieved function
+        eval(eval_func)
 
         print(resp)
-        # image has been uploaded and registered.
-        img_name = resp
 
-        steps_performed.append(["registered with visual_chatgpt", f"{resp}"])
+        time.sleep(0.3)
 
-        # ask for instruction providing image name, and task, step
-        # resp = predict(f"image/{img_name} what is the next step ?")
-        resp = predict(f"image/{img_name} screenshot where automation is being performed,  now for each instructional step: {step}, generate an 'eval_func':a string with a valid pyautogui function to perform the next step, reply should start with 'eval_func: '")
+        img_name = screenshot(step_counter, 'after', retry)
 
-        eval_func = resp['data'][0][-1][1].split('eval_func:')[1]
+        task_done = predict(f"image/{img_name} screenshot, has the automation been successfully performed, for this instructional step: {step} ? If yes say '0', otherwise '1'" )
 
-        steps_performed.append(["eval_func", f"{eval_func}"])
-        # evaluate the recieved function
-        # eval(eval_func)
-        print(eval_func)
+        task_done = task_done['data'][0][-1][1]
 
-    return jsonify({
-            "task_finished": True,
-            "steps_response": steps_response['data'][0][-1][1],
-            "purify_steps_response": purify_steps_response,
-            # "steps": steps,
-            # "each_step": each_step_response['choices'][0]['text'],
-            # "purify_each_step": purify_each_step_response['data'][0][-1][1],
-            # "most_purified": array,
-            "steps_performed": steps_performed,
-            "started_at": started_at,
-            "timeout": timeout,
-            "now": time.time()
-        }), 200
+        if '1' in task_done:
+            if retry < 3 :
+                retry += 1
+            else:
+                emit("steps", f"this task step has exceeded the retry limit.")
+                emit("task finished")
+                task_finished = True
+            continue
+        elif step_counter < len(purify_steps_response) - 1:
+            step_counter += 1
+            retry = 0
+        else:
+          task_finished = True
 
+    emit("task finished")
+    return 0
 
-
-
-    # while not task_finished:
-
-
-        # resp_string = predict(f"remove everything including conjunctions and interjections from '{resp['data'][0][-1][1]}' and leaving only steps separated by a comma.")
-
-        # resp_obj = json.loads(re.search(r"\{.*\}", resp_string))
-
-        # steps_performed.append([f"step_{step_counter}", resp_string])
-        # print(resp_string)
-
-        # # if time.time() > timeout:
-        # if step_counter > len(steps) - 2:
-        #     break
-        # else:
-        #     step_counter += 1
-
-        # evaluate the recieved function
-        # eval(eval_func)
-
-    # return jsonify({"task_finished": True, "steps": steps, "performed": steps_performed, "started_at": started_at, "timeout": timeout, "now": time.time()}), 200
+@socketio.on('msg_event')
+def handle_message(message):
+    print(f'received message: {message}')
+    emit("res_event", "Ok, from flask server.")
 
 if __name__ == '__main__':
-    app.run(debug=True)
-
-
-# list stages(in terms of pyautogui functions) in order to do the task in the shortest possible way,
-# for each step, generate a (pyautogui function call) as a string, which can be compiled using eval,
-# compile that eval using eval, and generate a screenshot,
-# upload screenshot and ask if the step was done, say '0', else '1',
-# if its '0', ask for next step,
+    socketio.run(app)
+    # app.run(debug=True)

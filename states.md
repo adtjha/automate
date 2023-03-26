@@ -253,3 +253,8 @@ now for each instructional step, generate an array of three strings, \n'task_fin
 now for each instructional step, generate an array of three strings, \n'task_finished': True if the task: {task} has been completed otherwise False, 'purpose': description of the purpose of the next step, 'eval_func':a string with a valid pyautogui function to perform the next step,
 
 Convert given string to an array of steps which can be read using a python code.\n\n\n{response}\n\n\nreply only an array, treat this as if this message will be read by a computer,
+
+you are going to play a game I invented,
+In this game, I don't know how to operate a computer, and you have to generate instructions to complete the task:'{task}',
+remember answer by AI is always an array of strings or else I lose the game,
+reply with an array of strings, containing the steps to undertake to complete the task.

@@ -7,6 +7,11 @@
     <title>Home</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/wavesurfer.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"
+      integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA=="
+      crossorigin="anonymous"
+    ></script>
   </head>
   <body
     class="h-screen flex flex-col items-center justify-center w-screen min-h-screen bg-gray-100 text-gray-800 p-4"
@@ -69,6 +74,9 @@
     </div>
 
     <script>
+      const socket = io.connect(
+        "http://" + document.domain + ":" + location.port
+      );
       let isRecording,
         taskMessage,
         mediaRecorder,
@@ -217,30 +225,86 @@
       const validateTask = async (task) => {
         disableActionButtons();
         console.log({ task });
-        const validationResponse = await fetch(
-          `http://localhost:5000/validate/?task=${task}`
-        )
-          .then((response) => {
-            if (response.ok) return response;
-            else
-              throw Error(
-                `Server returned ${response.status}: ${response.statusText}`
-              );
-          })
-          .then((response) => response.json())
-          .catch((err) => {
-            alert(err);
-          });
+        let message = "";
+        // validate if transcript is an actual task,
+        socket.emit("validate", { task });
 
-        const newDiv = document.createElement("div");
-        newDiv.classList.add("py-4", "px-8", "rounded-2xl");
-        newDiv.innerHTML = `${validationResponse}`;
+        // const newDiv = document.createElement("div");
+        // newDiv.classList.add("py-4", "px-8", "rounded-2xl");
+        // newDiv.innerHTML = `${JSON.stringify(message, null, 2)}`;
       };
 
-      // find out the steps involved using openai,
-      // print the steps, involved, with opacity of 0.6
-      // start doing the steps,
-      // as the step finishes, increase the opacity to 1.0,
+      const addMessage = (message) => {
+        const messageBox = document.createElement("div");
+        messageBox.classList.add(
+          "bg-gray-100",
+          "p-2",
+          "rounded-3xl",
+          "w-fit",
+          "max-w-full"
+        );
+
+        const newDiv = document.createElement("div");
+        newDiv.classList.add("py-4", "px-8", "rounded-2xl", "break-all");
+        newDiv.innerHTML = `${message}`;
+
+        messageBox.appendChild(newDiv);
+
+        document.querySelector("#chatbox").appendChild(messageBox);
+      };
+
+      const addNewImg = (img_name) => {
+        const messageBox = document.createElement("div");
+        messageBox.classList.add(
+          "bg-gray-100",
+          "p-2",
+          "rounded-3xl",
+          "w-full",
+          "flex",
+          "flex-wrap",
+          "justify-center"
+        );
+
+        const newImg = document.createElement("img");
+        newImg.classList.add(
+          "py-4",
+          "break-all",
+          "h-auto",
+          "max-w-sm",
+          "rounded-lg",
+          "shadow-none",
+          "transition-shadow",
+          "duration-300",
+          "ease-in-out",
+          "hover:shadow-lg",
+          "hover:shadow-black/30"
+        );
+        newImg.src = `./assets/${img_name}`;
+
+        messageBox.appendChild(newImg);
+
+        document.querySelector("#chatbox").appendChild(messageBox);
+      };
+
+      socket.on("transcript_result", (transcipt) => {
+        addMessage(transcipt);
+        setTimeout(validateTask(`${transcipt}`), 300);
+      });
+      socket.on("validation_result", ({ result, resp }) => addMessage(result));
+      // get steps to complete task,
+      // get update from serve, when each step is performed,
+      socket.on("steps", (steps) => addMessage(steps));
+      socket.on("images", (img_name) => addNewImg(img_name));
+      // on task finish, update,
+      socket.on("task completed", () =>
+        addMessage("Task completed successfully.")
+      );
+
+      socket.on("connect", function () {
+        socket.emit("msg_event", { data: "I'm connected!" });
+      });
+
+      socket.on("res_event", (d) => console.log(d));
     </script>
   </body>
 </html>
