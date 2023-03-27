@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/wavesurfer.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"
+      integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA=="
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body
+    class="h-screen flex flex-col items-center justify-center w-screen min-h-screen bg-gray-100 text-gray-800 p-4"
+  >
+    <div
+      class="relative flex flex-col flex-grow w-full h-full max-w-xl bg-white shadow-xl rounded-lg overflow-auto"
+    >
+      <div
+        id="chatbox"
+        class="h-full grid grid-cols-1 justify-center justify-items-center content-start gap-4 h-0 p-4 overflow-auto mb-24"
+      ></div>
+      <div
+        id="BtnArray"
+        class="w-max absolute bottom-4 left-0 right-0 m-auto flex flex-row items-center justify-items-center gap-4"
+      >
+        <button
+          id="recordBtn"
+          data-recording="0"
+          onclick="record()"
+          class="bg-gray-100 w-fit py-4 px-6 rounded-full shadow-md cursor-pointer flex flex-row items-center justify-center gap-4"
+        >
+          <span>Record</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+            />
+          </svg>
+        </button>
+        <button
+          id="newBtn"
+          onclick="(() => location.reload())()"
+          class="bg-gray-100 w-fit py-4 px-6 rounded-full shadow-md cursor-pointer flex flex-row items-center justify-center gap-4"
+        >
+          <span>New Task</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="w-5 h-5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <script>
+      const socket = io.connect(
+        "http://" + document.domain + ":" + location.port
+      );
+      let isRecording,
+        taskMessage,
+        mediaRecorder,
+        task = {
+          audio: false,
+          transcribe: false,
+          allowed: false,
+          done: false,
+        },
+        waveSurfers = [];
+
+      const record = () => {
+        isRecording = document.querySelector("#recordBtn").dataset.recording;
+        if (isRecording === "0") {
+          SetRecordBtn();
+
+          navigator.mediaDevices
+            .getUserMedia({ audio: true })
+            .then((stream) => {
+              console.log("Started recording");
+
+              mediaRecorder = new MediaRecorder(stream);
+              const chunks = [];
+
+              mediaRecorder.addEventListener("dataavailable", (event) => {
+                chunks.push(event.data);
+              });
+
+              mediaRecorder.addEventListener("stop", async () => {
+                task.audio = true;
+
+                const messageBox = document.createElement("div");
+                messageBox.classList.add(
+                  "bg-gray-100",
+                  "p-2",
+                  "rounded-3xl",
+                  "w-full"
+                );
+
+                const blob = new Blob(chunks, { type: "audio/ogg" });
+                const audioUrl = URL.createObjectURL(blob);
+                const audio = new Audio(audioUrl);
+                audio.classList.add("p-1", "w-full");
+                audio.controls = true;
+
+                messageBox.appendChild(audio);
+
+                const { text } = await sendAudioToBackend(blob);
+                const newDiv = document.createElement("div");
+                newDiv.classList.add(
+                  "py-4",
+                  "px-8",
+                  "rounded-2xl",
+                  "break-all"
+                );
+                newDiv.innerHTML = `${text}`;
+                taskMessage = `${text}`;
+                task.transcribe = true;
+
+                messageBox.appendChild(newDiv);
+
+                document.querySelector("#chatbox").appendChild(messageBox);
+
+                ResetRecordBtn();
+
+                setTimeout(validateTask(`${text}`), 1000);
+
+                audioTask = true;
+              });
+
+              mediaRecorder.start();
+
+              // setTimeout(() => {
+              //   if (
+              //     document.querySelector("#recordBtn").dataset.recording === "1"
+              //   ) {
+              //     mediaRecorder.stop();
+              //     document.querySelector("#recordBtn").dataset.recording = "0";
+              //     console.log("max : 1 minute audio.");
+              //     ResetRecordBtn();
+              //   }
+              // }, 5000);
+            })
+            .catch((error) => {
+              console.error(error);
+            });
+        } else {
+          mediaRecorder.stop();
+          document.querySelector("#recordBtn").dataset.recording = "0";
+          ResetRecordBtn();
+        }
+      };
+
+      const ResetRecordBtn = () => {
+        document.querySelector("#recordBtn").children[0].innerText = `Record`;
+        document
+          .querySelector("#recordBtn")
+          .children[1].classList.toggle("animate-ping", false);
+        document.querySelector(
+          "#recordBtn"
+        ).children[1].innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />`;
+      };
+
+      const SetRecordBtn = () => {
+        document.querySelector("#recordBtn").dataset.recording = "1";
+        document.querySelector(
+          "#recordBtn"
+        ).children[0].innerText = `Stop recording.`;
+        document.querySelector(
+          "#recordBtn"
+        ).children[1].innerHTML = `<svg viewBox="0 0 10 10" x="6" width="16" fill="red" stroke="red"> <circle cx="5" cy="5" r="4" /> </svg>`;
+        document
+          .querySelector("#recordBtn")
+          .children[1].classList.toggle("animate-ping", true);
+      };
+
+      const sendAudioToBackend = (blobData) => {
+        let fd = new FormData();
+        fd.append("audio", blobData);
+
+        console.log({ blobData, fd });
+        return fetch(`http://localhost:5000/audio`, {
+          headers: { Accept: "application/json" },
+          method: "POST",
+          body: fd,
+        })
+          .then((response) => {
+            if (response.ok) return response;
+            else
+              throw Error(
+                `Server returned ${response.status}: ${response.statusText}`
+              );
+          })
+          .then(async (response) => response.json())
+          .catch((err) => {
+            alert(err);
+          });
+      };
+
+      const disableActionButtons = () => {
+        document.querySelector("#recordBtn").style.opacity = 0.6;
+        document.querySelector("#recordBtn").disabled = true;
+      };
+
+      // Validate if the recorded message is a valid task that can be performed using pyautogui, on local machine.
+      const validateTask = async (task) => {
+        disableActionButtons();
+        console.log({ task });
+
+        // validate if transcript is an actual task,
+        const validationResponse = await fetch(
+          `http://localhost:5000/validate/?task=${task}`
+        )
+          .then((response) => {
+            if (response.ok) return response;
+            else
+              throw Error(
+                `Server returned ${response.status}: ${response.statusText}`
+              );
+          })
+          .then((response) => response.json())
+          .catch((err) => {
+            alert(err);
+          });
+
+        addMessage(validationResponse);
+      };
+
+      const addMessage = (message) => {
+        const messageBox = document.createElement("div");
+        messageBox.classList.add(
+          "bg-gray-100",
+          "p-2",
+          "rounded-3xl",
+          "w-fit",
+          "max-w-full"
+        );
+
+        const newDiv = document.createElement("div");
+        newDiv.classList.add("py-4", "px-8", "rounded-2xl", "break-all");
+        newDiv.innerHTML = `${message}`;
+
+        messageBox.appendChild(newDiv);
+
+        document.querySelector("#chatbox").appendChild(messageBox);
+        document.querySelector("#chatbox").lastChild.scrollIntoView();
+      };
+
+      const addNewImg = (data) => {
+        const [img_name, caption] = data.split("|");
+        const messageBox = document.createElement("div");
+        messageBox.classList.add(
+          "bg-gray-100",
+          "p-2",
+          "rounded-3xl",
+          "w-full",
+          "flex",
+          "flex-wrap",
+          "justify-center"
+        );
+
+        const newImg = document.createElement("img");
+        newImg.classList.add(
+          "p-0",
+          "break-all",
+          "h-auto",
+          "max-w-sm",
+          "rounded-lg",
+          "shadow-none",
+          "transition-shadow",
+          "duration-300",
+          "ease-in-out",
+          "hover:shadow-lg",
+          "hover:shadow-black/30"
+        );
+        newImg.src = `http://127.0.0.1:5550/assets/${img_name}.png`;
+
+        messageBox.appendChild(newImg);
+
+        let capt = document.createElement("figcaption");
+
+        capt.classList.add("text-sm", "text-gray-800");
+
+        capt.innerText = `${caption}`;
+
+        messageBox.appendChild(capt);
+
+        document.querySelector("#chatbox").appendChild(messageBox);
+      };
+
+      // get steps to complete task,
+      // get update from serve, when each step is performed,
+      socket.on("steps", (steps) => addMessage(steps));
+      socket.on("images", (data) => addNewImg(data));
+      // on task finish, update,
+      socket.on("task finished", () =>
+        addMessage("Task completed successfully.")
+      );
+
+      socket.on("connect", function () {
+        socket.emit("msg_event", { data: "I'm connected!" });
+      });
+
+      socket.on("res_event", (d) => console.log(d));
+    </script>
+  </body>
+</html>
