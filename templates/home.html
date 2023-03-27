@@ -21,7 +21,7 @@
     >
       <div
         id="chatbox"
-        class="h-full grid grid-cols-1 justify-center justify-items-center content-start gap-4 h-0 p-4 overflow-auto"
+        class="h-full grid grid-cols-1 justify-center justify-items-center content-start gap-4 h-0 p-4 overflow-auto mb-24"
       ></div>
       <div
         id="BtnArray"
@@ -149,16 +149,16 @@
 
               mediaRecorder.start();
 
-              setTimeout(() => {
-                if (
-                  document.querySelector("#recordBtn").dataset.recording === "1"
-                ) {
-                  mediaRecorder.stop();
-                  document.querySelector("#recordBtn").dataset.recording = "0";
-                  console.log("max : 1 minute audio.");
-                  ResetRecordBtn();
-                }
-              }, 5000);
+              // setTimeout(() => {
+              //   if (
+              //     document.querySelector("#recordBtn").dataset.recording === "1"
+              //   ) {
+              //     mediaRecorder.stop();
+              //     document.querySelector("#recordBtn").dataset.recording = "0";
+              //     console.log("max : 1 minute audio.");
+              //     ResetRecordBtn();
+              //   }
+              // }, 5000);
             })
             .catch((error) => {
               console.error(error);
@@ -225,13 +225,24 @@
       const validateTask = async (task) => {
         disableActionButtons();
         console.log({ task });
-        let message = "";
-        // validate if transcript is an actual task,
-        socket.emit("validate", { task });
 
-        // const newDiv = document.createElement("div");
-        // newDiv.classList.add("py-4", "px-8", "rounded-2xl");
-        // newDiv.innerHTML = `${JSON.stringify(message, null, 2)}`;
+        // validate if transcript is an actual task,
+        const validationResponse = await fetch(
+          `http://localhost:5000/validate/?task=${task}`
+        )
+          .then((response) => {
+            if (response.ok) return response;
+            else
+              throw Error(
+                `Server returned ${response.status}: ${response.statusText}`
+              );
+          })
+          .then((response) => response.json())
+          .catch((err) => {
+            alert(err);
+          });
+
+        addMessage(validationResponse);
       };
 
       const addMessage = (message) => {
@@ -251,9 +262,11 @@
         messageBox.appendChild(newDiv);
 
         document.querySelector("#chatbox").appendChild(messageBox);
+        document.querySelector("#chatbox").lastChild.scrollIntoView();
       };
 
-      const addNewImg = (img_name) => {
+      const addNewImg = (data) => {
+        const [img_name, caption] = data.split("|");
         const messageBox = document.createElement("div");
         messageBox.classList.add(
           "bg-gray-100",
@@ -267,7 +280,7 @@
 
         const newImg = document.createElement("img");
         newImg.classList.add(
-          "py-4",
+          "p-0",
           "break-all",
           "h-auto",
           "max-w-sm",
@@ -279,24 +292,27 @@
           "hover:shadow-lg",
           "hover:shadow-black/30"
         );
-        newImg.src = `./assets/${img_name}`;
+        newImg.src = `http://127.0.0.1:5550/assets/${img_name}.png`;
 
         messageBox.appendChild(newImg);
+
+        let capt = document.createElement("figcaption");
+
+        capt.classList.add("text-sm", "text-gray-800");
+
+        capt.innerText = `${caption}`;
+
+        messageBox.appendChild(capt);
 
         document.querySelector("#chatbox").appendChild(messageBox);
       };
 
-      socket.on("transcript_result", (transcipt) => {
-        addMessage(transcipt);
-        setTimeout(validateTask(`${transcipt}`), 300);
-      });
-      socket.on("validation_result", ({ result, resp }) => addMessage(result));
       // get steps to complete task,
       // get update from serve, when each step is performed,
       socket.on("steps", (steps) => addMessage(steps));
-      socket.on("images", (img_name) => addNewImg(img_name));
+      socket.on("images", (data) => addNewImg(data));
       // on task finish, update,
-      socket.on("task completed", () =>
+      socket.on("task finished", () =>
         addMessage("Task completed successfully.")
       );
 

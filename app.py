@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, jsonify, json, send_from_directory
 from flask_socketio import SocketIO, emit
-import eventlet
 import requests
 import os
 import openai
@@ -9,15 +8,13 @@ import uuid
 import re
 import time
 
-eventlet.monkey_patch()
-
 pyautogui.PAUSE=1
 pyautogui.FAILSAFE = False
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 session_hash = os.getenv("SESSION_HASH")
 
-
+sid = ''
 
 def predict(input):
     url = "http://127.0.0.1:7868/run/predict/"
@@ -126,8 +123,8 @@ def register(input):
     else:
         return False
 
-app = Flask(__name__, static_url_path='/assets')
-app.config['SECRET_KEY'] = 'secret!'
+app = Flask(__name__, static_url_path='/assets/', static_folder="assets/", template_folder="templates")
+# app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app)
 
 @app.route('/')
@@ -136,10 +133,8 @@ def home():
 
 
 @app.route('/audio', methods=['POST'])
-# @socketio.on("transcribe")
 def audio():
     audio_data = request.files.get('audio').read()
-    # audio_data = file['audio']
     print('Received audio data')
 
     # Create a temporary file to write the audio data to
@@ -153,33 +148,31 @@ def audio():
     # Clean up the temporary file
     os.remove('audio.mp3')
 
-    # emit('transcript_result', f"\"{transcript}\"")
-
     return transcript
 
-# @app.route('/validate/')
-@socketio.on('validate')
-def validateTask(task):
-    # task = request.args.get('task')
+@app.route('/validate/')
+def validateTask():
+    task = request.args.get('task')
     print(task)
-    resp = predict()
 
     resp =  openai.Completion.create(
         model="text-davinci-003",
-        prompt='''Is this task a valid task which can be automated using pyautogui functions, in a step by step manner?\ntask : {taskMessage}\nreply with 0 for true or 1 for false on the first line and the reason on the second line.'''.format(taskMessage=task),
-        temperature=0.7
+        prompt=f"Is this task a valid task which can be automated using pyautogui functions, in a step by step manner?\ntask : '{task}'\nreply with 0 for true or 1 for false on the first line and the reason on the second line.",
+        temperature=0.05
     )
 
-    if '0' in resp['data'][0][-1][1]:
-        emit("validation result", {"result": str(resp['data'][0][-1][1]), "response": resp})
+    resp = resp['choices'][0]['text']
+
+    if '0' in resp:
         doTask(task)
-        print(f"response for {task} is {resp['data'][0][-1][1]}")
-        # return jsonify({"result": str(resp['data'][0][-1][1]), "response": resp}), 200
+        print(f"response for {task} is {resp}")
+        emit('steps', "Generating steps to complete task.", broadcast=True, namespace="/")
+        return jsonify({"result": str(resp)}), 200
     else:
         # why = predict(f"state the reason why the task:{task}, can't be done ?")
         why = why.json()
-        # return jsonify({"result": str(resp['data'][0][-1][1]), "why": why['data'][0][-1][1]}), 200
-        emit("validation result", {"result": str(resp['data'][0][-1][1]), "why": why['data'][0][-1][1]})
+        emit('steps', "Generating steps to complete task.", broadcast=True, namespace="/")
+        return jsonify({"result": str(resp)}), 200
 
 def screenshot(step_counter, when, retry):
     # set name of screenshot.
@@ -194,8 +187,6 @@ def screenshot(step_counter, when, retry):
     # upload the image to the server
     location = upload(location=f"assets/{before_screenshot_name}.png", name=f"{before_screenshot_name}", type='image/png')
 
-    # steps_performed.append(["upload", f"screenshot uploaded, name={before_screenshot_name}.png, location=assets/{before_screenshot_name}.png"])
-
     # image meta data along with location and size, for registering the image.
     img = {
             "name": location[0],
@@ -207,9 +198,7 @@ def screenshot(step_counter, when, retry):
         }
     resp =  register(img)
 
-    # steps_performed.append(["registered with visual_chatgpt", f"{resp}"])
-
-    return resp
+    return resp, before_screenshot_name
 
 # @app.route('/do/')
 def doTask(task):
@@ -220,35 +209,50 @@ def doTask(task):
     started_at = time.time()
     timeout = started_at + 300
 
-    steps_response = predict(f"you are going to play a game I invented,\nIn this game, I don't know how to operate a computer, and you have to generate instructions to complete the task:'{task}',\nremember your reply is always an array of strings or else I lose the game,\nreply with an array of strings, containing the steps to undertake to complete the task:{task}. try to use shortcut key combos.")
+    steps_response = predict(f"Generate instructions to complete the task '{task}' without generating an image. Your reply should be an array of strings and include shortcut key combos. Avoid providing alternatives and remember that I don't know how to operate a computer.")
+    steps_response = steps_response['data'][0][-1][1].replace("‘", "\"").replace("’", "\"").replace("\n", "")
 
-    emit("steps", steps_response['data'][0][-1][1])
+    emit("steps", str(steps_response), broadcast=True, namespace="/")
 
-    purify_steps_response = openai.Completion.create(
-        model="text-davinci-003",
-        prompt=f"string = \"{steps_response['data'][0][-1][1]}\"\nlist steps as an array",
-        temperature=0.05
+    purify_steps_response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role":"system", "content": "You are a helpful assistant. You are going to assit me to operate a computer. Remember to either escape the double quotes inside the string using a backslash (\"), or use single quotes to delimit the inner strings."},
+            {"role":"user", "content": "The steps to complete the task: Open Chrome and search about gandhi. are as follows:<br>\n<br>\n1. task_finished: False, purpose: open Chrome, eval_func: pyautogui.hotkey(‘win’,‘r’)<br>\n2. task_finished: False, purpose: type in ‘chrome’ in the search bar, eval_func: pyautogui.typewrite(‘chrome’)<br>\n3. task_finished: False, purpose: press enter to open Chrome, eval_func: pyautogui.press(‘enter’)<br>\n4. task_finished: False, purpose: type in ‘gandhi’ in the search bar, eval_func: pyautogui.typewrite(‘gandhi’)<br>\n5. task_finished: True, purpose: press enter to search for ‘gandhi’, eval_func: pyautogui.press(‘enter’)<br>\n<br>\nThese steps can be accessed in the format steps[0][‘task_finished’], steps[0][‘purpose’], steps[0][‘eval_func’]."},
+            {"role":"assistant", "content": "[\"open Chrome\", \"type in 'chrome' in the search bar\", \"press enter to open Chrome\", \"type in 'gandhi' in the search bar\", \"press enter to search for 'gandhi'\"]"},
+            {"role":"user", "content": f"string = \"{steps_response}\"\nlist steps in the form of a single array, where each value is an instructional step to do a single operation, remove any alternatives."},
+        ]
     )
 
-    if eval(purify_steps_response['choices'][0]['text']):
-        purify_steps_response = eval(purify_steps_response['choices'][0]['text'])
+    purify_steps_response = purify_steps_response['choices'][0]['message']['content']
+    print(purify_steps_response)
+
+    start_index = purify_steps_response.find('[')
+    end_index = purify_steps_response.find(']')
+    if start_index != -1 and end_index != -1:
+        purify_steps_response = purify_steps_response[start_index:end_index+1]
+
+    purify_steps_response = json.loads(purify_steps_response)
+
+    # pyautogui.hotkey('win', 'd')
 
 
-    while not task_finished and timeout > time.time():
+    retry = 0
+    while not task_finished:
         step = purify_steps_response[step_counter]
         # image has been uploaded and registered.
-        img_name = screenshot(step_counter, 'before', retry)
+        img_name, before = screenshot(step_counter, 'before', retry)
 
-        emit("images", img_name)
+        emit("images", f'{before}|screenshot taken before step:{step}', broadcast=True, namespace="/")
 
-        resp = predict(f"image/{img_name} screenshot of screen. Is this step necessary ? to achieve game task:{task}. if necessary say 'necessary'")
+        resp = predict(f"image/{img_name} screenshot of screen. Is this step required ? to complete the game task:{task}. if required say 'required'")
         resp = resp['data'][0][-1][1]
 
-        if not ('necessary' in resp):
+        if not ('required' in resp):
             print(resp)
-            emit('steps', f"Skipping this step because {resp}")
+            emit('steps', f"Skipping this step because {resp}", broadcast=True, namespace="/")
             step_counter += 1
-            time.sleep(1)
+            # time.sleep(1)
             continue
 
         resp = ''
@@ -256,11 +260,11 @@ def doTask(task):
             # ask for instruction providing image name, and task, step
             resp = predict(f"Retrying this step for the {retry} time, image/{img_name} screenshot of current screen, now for this instructional step: {step}, generate a valid pyautogui function with inputs (like this but not this \"eval_func: pyautogui.press('enter')\"). your reply will be used executed using an eval() function. your reply should start with 'eval_func: '.")
         else:
-            resp = predict(f"image/{img_name} screenshot of current screen, now for this instructional step: {step}, generate a valid pyautogui function with inputs (like this but not this \"eval_func: pyautogui.press('enter')\"). your reply will be used executed using an eval() function. your reply should start with 'eval_func: '.")
+            resp = predict(f"image/{img_name} screenshot of current screen, now for this instructional step: {step}, generate all possible valid pyautogui function with inputs (like this but not this \"eval_func: \"pyautogui.typewrite('chrome', interval=0.25);\npyautogui.press('enter')\")\". your reply will be used executed using an eval() function. your reply should start with 'eval_func: '.")
 
         resp = resp['data'][0][-1][1]
 
-        emit("steps", resp)
+        emit("steps", resp, json=True, broadcast=True, namespace="/")
 
         # regular expression pattern to match pyautogui function calls
         pattern = r'pyautogui\.\w+\(.*\)'
@@ -269,7 +273,7 @@ def doTask(task):
         eval_func = re.search(pattern, resp).group()
 
         # remove unwanted characters.
-        eval_func = eval_func.replace("‘", "\"").replace("’", "\"").replace("\n", "")
+        eval_func = eval_func.replace("“", "\"").replace("‘", "\'").replace("”", "\"").replace("’", "\'").replace("\n", "")
 
         steps_performed.append(["eval_func", f"{resp}"])
         # evaluate the recieved function
@@ -277,11 +281,13 @@ def doTask(task):
 
         print(resp)
 
-        time.sleep(0.3)
+        # time.sleep(0.3)
 
-        img_name = screenshot(step_counter, 'after', retry)
+        img_name, before = screenshot(step_counter, 'after', retry)
 
-        task_done = predict(f"image/{img_name} screenshot, has the automation been successfully performed, for this instructional step: {step} ? If yes say '0', otherwise '1'" )
+        emit("images", f'{before}|screenshot taken after step:{step}', broadcast=True, namespace="/")
+
+        task_done = predict(f"Has the step \"{step}\" been successfully automated using the pyautogui function {eval_func}, resulting in the expected screen shown in the image: images/{img_name}? say '0' for yes, '1' for no" )
 
         task_done = task_done['data'][0][-1][1]
 
@@ -289,23 +295,41 @@ def doTask(task):
             if retry < 3 :
                 retry += 1
             else:
-                emit("steps", f"this task step has exceeded the retry limit.")
-                emit("task finished")
+                emit("steps", f"this task step has exceeded the retry limit.", broadcast=True, namespace="/")
+                emit("task finished", broadcast=True, namespace="/")
                 task_finished = True
             continue
         elif step_counter < len(purify_steps_response) - 1:
+        # if step_counter < len(purify_steps_response) - 1:
             step_counter += 1
             retry = 0
         else:
           task_finished = True
 
-    emit("task finished")
+    emit("task finished", broadcast=True, namespace="/")
     return 0
 
 @socketio.on('msg_event')
 def handle_message(message):
     print(f'received message: {message}')
-    emit("res_event", "Ok, from flask server.")
+    sid = request.sid
+    emit("res_event", "Ok, from flask server.", broadcast=True, namespace="/")
+    emit("steps", "Hello, there.\nRecord your task, and let me do the rest.", broadcast=True, namespace='/')
+
+@socketio.on_error()        # Handles the default namespace
+def error_handler(e):
+    print(request.event["message"])
+    return 0
+
+@socketio.on_error('/chat') # handles the '/chat' namespace
+def error_handler_chat(e):
+    print(request.event["message"])
+    return 0
+
+@socketio.on_error_default  # handles all namespaces without an explicit error handler
+def default_error_handler(e):
+    print(request.event["message"])
+    return 0
 
 if __name__ == '__main__':
     socketio.run(app)
