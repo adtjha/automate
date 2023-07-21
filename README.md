@@ -1,7 +1,7 @@
 # automate
 
 ### Brief
-I created a flask server that displays a homepage with a chatbox. Users can record their tasks through the chatbox, and the server sends the task audio to the Whisper API, which generates a transcript. The task is then validated using the OpenAI GPT-3.5 API. If the task can be performed on a computer, it is broken down into smaller steps using the GPT-3.5 API. The server loops through each step, providing a screenshot to Visual_ChatGPT and asking for PyAutoGUI functions to complete that step. Once all the steps are completed, the server sends the response back to the frontend.
+Created a flask server that displays a homepage with a chatbox. Users can record their tasks through the chatbox, and the server sends the task audio to the Whisper API, which generates a transcript. The task is then validated using the OpenAI GPT-3.5 API. If the task can be performed on a computer, it is broken down into smaller steps using the GPT-3.5 API. The server loops through each step, providing a screenshot to Visual_ChatGPT and asking for PyAutoGUI functions to complete that step. Once all the steps are completed, the server sends the response back to the frontend.
 
 If I use a better fine-tuned model, It's possible to do much lengthy tasks. Also Visual chatgpt uses text-davinci-002, GPT-4 will have much better performance.
 
